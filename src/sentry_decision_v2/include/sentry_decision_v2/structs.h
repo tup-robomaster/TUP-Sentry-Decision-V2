@@ -7,6 +7,9 @@
 #include <mutex>
 #include <map>
 
+#define MAX_WAYPOINT_DISTANCE double(1.0)
+#define STAGE_FULL_TIME int(420)
+
 namespace sentry
 {
     struct Way_Point
@@ -35,8 +38,9 @@ namespace sentry
 
     struct Mission
     {
+        int status;
+        int goal_id = -1;
         std::string name;
-        bool status;
         bool if_spin = false;
         Way_Point move_taget;
         double timeout = 10000;
@@ -46,13 +50,124 @@ namespace sentry
 
     struct Blackboard
     {
+    private:
         std::mutex mutex;
         int _hp = -1;
         Eigen::Vector2d _pos = Eigen::Vector2d::Zero();
+        int current_waypointID = -1;
         int _oupost_hp_remaining = -1;
         int _time_remaining = -1;
         int _stage = -1;
-        std::map<Mission, int> _missions;
+        double current_time = -1;
+        std::queue<Mission> _missions;
+
+    public:
+        void update(int hp, int oupost_hp_remaining, int time_remaining, int stage)
+        {
+            std::lock_guard<std::mutex> lck(mutex);
+            _hp = hp;
+            _oupost_hp_remaining = oupost_hp_remaining;
+            _time_remaining = time_remaining;
+            _stage = stage;
+        }
+
+        bool checkAvilable()
+        {
+            std::lock_guard<std::mutex> lck(mutex);
+            return _hp != -1 && _oupost_hp_remaining != -1 && _time_remaining != -1 && _stage != -1;
+        }
+
+        void updatePos(Eigen::Vector2d &pos)
+        {
+            std::lock_guard<std::mutex> lck(mutex);
+            _pos = pos;
+        }
+
+        int getStage()
+        {
+            std::lock_guard<std::mutex> lck(mutex);
+            return _stage;
+        }
+
+        void setTime(double t)
+        {
+            std::lock_guard<std::mutex> lck(mutex);
+            current_time = t;
+        }
+
+        double getTime()
+        {
+            std::lock_guard<std::mutex> lck(mutex);
+            return current_time;
+        }
+
+        void setWayPointID(int id)
+        {
+            std::lock_guard<std::mutex> lck(mutex);
+            current_waypointID = id;
+        }
+
+        int getWayPointID()
+        {
+            std::lock_guard<std::mutex> lck(mutex);
+            return current_waypointID;
+        }
+
+        bool compare(const Decision_Warp d)
+        {
+            std::lock_guard<std::mutex> lck(mutex);
+            return !((d.waypointID != -1 && d.waypointID != current_waypointID) ||
+                     (d.start_time != -1 && STAGE_FULL_TIME - _time_remaining < d.start_time) ||
+                     (d.end_time != -1 && STAGE_FULL_TIME - _time_remaining >= d.end_time) ||
+                     (d.minHP != -1 && _hp < d.minHP) ||
+                     (d.maxHP != -1 && _hp >= d.maxHP) ||
+                     (d.outpost_minHP != -1 && _oupost_hp_remaining < d.outpost_minHP));
+        }
+
+        bool checkMissionsComplete()
+        {
+            std::lock_guard<std::mutex> lck(mutex);
+            return _missions.empty();
+        }
+
+        void cleanUpMissions()
+        {
+            std::lock_guard<std::mutex> lck(mutex);
+            while (_missions.size() > 0)
+            {
+                _missions.pop();
+            }
+        }
+
+        void setMissionStatus(int _status)
+        {
+            std::lock_guard<std::mutex> lck(mutex);
+            _missions.front().status = _status;
+        }
+
+        Mission &getMission()
+        {
+            std::lock_guard<std::mutex> lck(mutex);
+            return _missions.front();
+        }
+
+        void popMission()
+        {
+            std::lock_guard<std::mutex> lck(mutex);
+            _missions.pop();
+        }
+
+        bool isMissionEmpty()
+        {
+            std::lock_guard<std::mutex> lck(mutex);
+            return _missions.empty();
+        }
+
+        void insertMission(Mission &m)
+        {
+            std::lock_guard<std::mutex> lck(mutex);
+            _missions.emplace(m);
+        }
     };
 } // namespace sentry
 

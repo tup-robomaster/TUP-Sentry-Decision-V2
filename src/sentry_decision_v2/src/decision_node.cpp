@@ -22,15 +22,29 @@ namespace sentry
 
   void RobotDecisionNode::initParam()
   {
+    double local_rate;
+    this->declare_parameter<double>("local_rate", 20.0);
     this->declare_parameter<std::string>("waypoints_file", "default_waypoints.json");
     this->declare_parameter<std::string>("decisions_file", "default_decisions.json");
+    this->get_parameter("local_rate", local_rate);
+    local_rate_ = std::make_shared<rclcpp::Rate>(local_rate);
     this->get_parameter("waypoints_file", waypoints_file);
     this->get_parameter("decisions_file", decisions_file);
   }
 
   void RobotDecisionNode::initSubscribers()
   {
-    uart_sub_ = this->create_subscription<auto_aim_interfaces::msg::Uart>("/uart", rclcpp::QoS(10).reliable().keep_last(1), std::bind(&RobotDecisionNode::uartSubCallback, this, std::placeholders::_1));
+    tf_buffer_ = std::make_unique<tf2_ros::Buffer>(this->get_clock());
+    tf_ = std::make_shared<tf2_ros::TransformListener>(*tf_buffer_);
+    uart_sub_ = this->create_subscription<auto_aim_interfaces::msg::Uart>("/uart", rclcpp::QoS(10).best_effort().keep_last(1), std::bind(&RobotDecisionNode::uartSubCallback, this, std::placeholders::_1));
+    this->nav_to_pose_feedback_sub_ = this->create_subscription<nav2_msgs::action::NavigateToPose::Impl::FeedbackMessage>(
+        "navigate_through_poses/_action/feedback",
+        rclcpp::QoS(10).best_effort().keep_last(1),
+        std::bind(&RobotDecisionNode::nav2FeedBackCallBack, this, std::placeholders::_1));
+    this->nav_to_pose_goal_status_sub_ = this->create_subscription<action_msgs::msg::GoalStatusArray>(
+        "navigate_through_poses/_action/status",
+        rclcpp::QoS(10).best_effort().keep_last(1),
+        std::bind(&RobotDecisionNode::nav2GoalStatusCallBack, this, std::placeholders::_1));
   }
 
   void RobotDecisionNode::initPublishers()
@@ -40,15 +54,12 @@ namespace sentry
 
   void RobotDecisionNode::init()
   {
+    main_thread_ = std::make_shared<std::thread>(std::bind(&RobotDecisionNode::run, this));
   }
 
   void RobotDecisionNode::uartSubCallback(const auto_aim_interfaces::msg::Uart::SharedPtr msg)
   {
-    std::lock_guard<std::mutex> lck(blackboard.mutex);
-    blackboard._hp = msg->sentry_hp;
-    blackboard._oupost_hp_remaining = msg->outpost_hp;
-    blackboard._stage = msg->game_stage;
-    blackboard._time_remaining = msg->remain_time;
+    blackboard.update(msg->sentry_hp, msg->outpost_hp, msg->remain_time, msg->game_stage);
   }
 
   bool RobotDecisionNode::readJsonFile()
@@ -107,6 +118,134 @@ namespace sentry
     }
     jsonFile_decisions.close();
     return true;
+  }
+
+  void RobotDecisionNode::run()
+  {
+    while (rclcpp::ok())
+    {
+      local_rate_->sleep();
+      if (!this->blackboard.checkAvilable())
+        continue;
+      if (this->blackboard.getStage() != 4)
+      {
+        RCLCPP_WARN_ONCE(this->get_logger(), "NOT RECIVE START SIGINAL");
+        continue;
+      }
+      blackboard.setTime(this->get_clock()->now().nanoseconds() / 1e9);
+      geometry_msgs::msg::TransformStamped::SharedPtr transformStamped = nullptr;
+      try
+      {
+        transformStamped = std::make_shared<geometry_msgs::msg::TransformStamped>(this->tf_buffer_->lookupTransform("map", "base_link", tf2::TimePointZero));
+      }
+      catch (tf2::TransformException &ex)
+      {
+        RCLCPP_ERROR(
+            this->get_logger(),
+            "Cannot get transform ! TransformException: %s",
+            ex.what());
+        continue;
+      }
+      if (transformStamped == nullptr)
+      {
+        RCLCPP_ERROR(this->get_logger(), "Failed to get transformStamped");
+        continue;
+      }
+      Eigen::Vector2d now_pose;
+      now_pose << transformStamped->transform.translation.x, transformStamped->transform.translation.y;
+      blackboard.updatePos(now_pose);
+      blackboard.setWayPointID(calcCurrentWayPoint(now_pose));
+      std::shared_ptr<Decision_Warp> currentDecision = makeDecision();
+      if (currentDecision == nullptr)
+      {
+        RCLCPP_ERROR(this->get_logger(), "Failed to make Decision! Check your profile");
+        continue;
+      }
+      if (past_decision != nullptr)
+      {
+        if (blackboard.checkMissionsComplete())
+          past_decision = currentDecision;
+        else
+        {
+          if (past_decision->weight < currentDecision->weight || blackboard.getMission().status == action_msgs::msg::GoalStatus::STATUS_ABORTED ||
+              blackboard.getMission().status == action_msgs::msg::GoalStatus::STATUS_CANCELED ||
+              blackboard.getMission().status == action_msgs::msg::GoalStatus::STATUS_UNKNOWN)
+          {
+            RCLCPP_INFO(this->get_logger(), "Decision override ,Mission changed!");
+            past_decision = currentDecision;
+          }
+          else if (blackboard.getMission().status == action_msgs::msg::GoalStatus::STATUS_SUCCEEDED)
+          {
+            blackboard.popMission();
+            if (!blackboard.checkMissionsComplete())
+            {
+              Mission current_mission = blackboard.getMission();
+              //TODO:
+            }
+          }
+          //TODO:
+        }
+      }
+      else
+      {
+        //TODO:
+        past_decision = currentDecision;
+      }
+      //TODO:
+    }
+  }
+
+  int RobotDecisionNode::calcCurrentWayPoint(Eigen::Vector2d &pos)
+  {
+    int nearestWayPointID = -1;
+    double min_distance = INFINITY;
+    for (auto &it : waypoints)
+    {
+      double temp_distance = (pos - Eigen::Vector2d(it->x, it->y)).norm();
+      if (temp_distance < min_distance)
+      {
+        min_distance = temp_distance;
+        nearestWayPointID = it->id;
+      }
+    }
+    if (min_distance > MAX_WAYPOINT_DISTANCE)
+      nearestWayPointID = -1;
+    return nearestWayPointID;
+  }
+
+  std::shared_ptr<Decision_Warp> RobotDecisionNode::makeDecision()
+  {
+    std::vector<std::shared_ptr<Decision_Warp>> local_decisions;
+    for (auto &it : decisions)
+    {
+      if (blackboard.compare(*it))
+        local_decisions.emplace_back(it);
+    }
+    std::sort(local_decisions.begin(), local_decisions.end(), [](std::shared_ptr<sentry::Decision_Warp> A, std::shared_ptr<sentry::Decision_Warp> B)
+              { return A->weight > B->weight; });
+    if (local_decisions.empty())
+      return nullptr;
+    return local_decisions[0];
+  }
+
+  void RobotDecisionNode::nav2FeedBackCallBack(const nav2_msgs::action::NavigateToPose::Impl::FeedbackMessage::SharedPtr msg)
+  {
+    RCLCPP_DEBUG(
+        this->get_logger(),
+        "Receive Nav2FeedBack: Distance Remainimg: %f Current Pose: x=%lf , y=%lf , z=%lf Time Remaining: %d in frame %s",
+        msg->feedback.distance_remaining, msg->feedback.current_pose.pose.position.x, msg->feedback.current_pose.pose.position.y, msg->feedback.current_pose.pose.position.z, msg->feedback.estimated_time_remaining.sec, msg->feedback.current_pose.header.frame_id.c_str());
+  }
+
+  void RobotDecisionNode::nav2GoalStatusCallBack(const action_msgs::msg::GoalStatusArray::SharedPtr msg)
+  {
+    if (msg->status_list.back().status != action_msgs::msg::GoalStatus::STATUS_EXECUTING)
+    {
+      RCLCPP_INFO(
+          this->get_logger(),
+          "Nav2StatusCallBack Status: %d",
+          msg->status_list.back().status);
+      blackboard.setMissionStatus(msg->status_list.back().status);
+    }
   }
 } // namespace sentry
 
