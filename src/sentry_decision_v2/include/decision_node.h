@@ -4,14 +4,16 @@
 #include "./sentry_decision_v2/structs.h"
 #include <rclcpp_action/rclcpp_action.hpp>
 #include <rclcpp/rclcpp.hpp>
-#include "auto_aim_interfaces/msg/uart.hpp"
+#include <auto_aim_interfaces/msg/uart.hpp>
 #include <tf2/utils.h>
 #include <tf2/exceptions.h>
 #include <tf2_ros/transform_listener.h>
 #include <tf2_ros/buffer.h>
 #include <ament_index_cpp/get_package_share_directory.hpp>
 #include <nav2_behavior_tree/plugins/action/navigate_to_pose_action.hpp>
+#include <nav2_util/geometry_utils.hpp>
 #include <fstream>
+#include <regex>
 #include <geometry_msgs/msg/pose.hpp>
 #include <visualization_msgs/msg/marker.hpp>
 #include <visualization_msgs/msg/marker_array.hpp>
@@ -38,6 +40,9 @@ namespace sentry
         void nav2FeedBackCallBack(const nav2_msgs::action::NavigateToPose::Impl::FeedbackMessage::SharedPtr msg);
         int calcCurrentWayPoint(Eigen::Vector2d &pos);
         std::shared_ptr<Decision_Warp> makeDecision();
+        std::shared_ptr<Way_Point> getWay_PointByID(int id);
+        bool executeMission(Mission &mission);
+        Mission parseMission(std::string &str);
 
     private:
         std::shared_ptr<rclcpp::Rate> local_rate_;
@@ -53,11 +58,12 @@ namespace sentry
         rclcpp::Subscription<nav2_msgs::action::NavigateToPose::Impl::GoalStatusMessage>::SharedPtr
             nav_to_pose_goal_status_sub_;
         std::shared_ptr<std::thread> main_thread_;
-
+        rclcpp_action::Client<nav2_msgs::action::NavigateToPose>::SharedPtr nav_to_poses_action_client_;
         std::vector<std::shared_ptr<Way_Point>> waypoints;
         std::vector<std::shared_ptr<Decision_Warp>> decisions;
 
         std::shared_ptr<Decision_Warp> past_decision = nullptr;
+        Mission last_Mission;
     };
 } // namespace sentry
 

@@ -9,6 +9,10 @@
 
 #define MAX_WAYPOINT_DISTANCE double(1.0)
 #define STAGE_FULL_TIME int(420)
+#define GAME_STAGE_START int(4)
+
+#define MISSION_TYPE_MOVE std::string("move")
+#define MISSION_TYPE_WAIT std::string("wait")
 
 namespace sentry
 {
@@ -39,11 +43,9 @@ namespace sentry
     struct Mission
     {
         int status;
-        int goal_id = -1;
         std::string name;
         bool if_spin = false;
         Way_Point move_taget;
-        double timeout = 10000;
         double time_stay = 1000;
         double starting_time = -1;
     };
@@ -54,12 +56,14 @@ namespace sentry
         std::mutex mutex;
         int _hp = -1;
         Eigen::Vector2d _pos = Eigen::Vector2d::Zero();
+        double theta = 0.0;
         int current_waypointID = -1;
         int _oupost_hp_remaining = -1;
         int _time_remaining = -1;
         int _stage = -1;
         double current_time = -1;
         std::queue<Mission> _missions;
+        double wait_timeout_time = 0;
 
     public:
         void update(int hp, int oupost_hp_remaining, int time_remaining, int stage)
@@ -130,6 +134,12 @@ namespace sentry
             return _missions.empty();
         }
 
+        bool checkWaitingComplete()
+        {
+            std::lock_guard<std::mutex> lck(mutex);
+            return wait_timeout_time - current_time < 1e-6;
+        }
+
         void cleanUpMissions()
         {
             std::lock_guard<std::mutex> lck(mutex);
@@ -137,6 +147,7 @@ namespace sentry
             {
                 _missions.pop();
             }
+            wait_timeout_time = 0;
         }
 
         void setMissionStatus(int _status)
@@ -167,6 +178,25 @@ namespace sentry
         {
             std::lock_guard<std::mutex> lck(mutex);
             _missions.emplace(m);
+        }
+
+        void setWaitTime(double sec)
+        {
+            std::lock_guard<std::mutex> lck(mutex);
+            wait_timeout_time = current_time + sec;
+        }
+
+        double getWaitTimeoutTime()
+        {
+            std::lock_guard<std::mutex> lck(mutex);
+            return wait_timeout_time;
+        }
+
+        void getPose(Eigen::Vector2d &pos, double &w)
+        {
+            std::lock_guard<std::mutex> lck(mutex);
+            pos = _pos;
+            w = theta;
         }
     };
 } // namespace sentry

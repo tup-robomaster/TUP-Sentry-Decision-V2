@@ -54,6 +54,21 @@ namespace sentry
 
   void RobotDecisionNode::init()
   {
+    RCLCPP_INFO(
+        this->get_logger(),
+        "Starting action_client");
+    this->nav_to_poses_action_client_ = rclcpp_action::create_client<nav2_msgs::action::NavigateToPose>(this, "navigate_through_poses");
+    if (!this->nav_to_poses_action_client_->wait_for_action_server(std::chrono::seconds(5)))
+    {
+      RCLCPP_ERROR(
+          this->get_logger(),
+          "Action server not available after waiting");
+      return;
+    }
+    else
+    {
+      this->nav_to_poses_action_client_->async_cancel_all_goals();
+    }
     main_thread_ = std::make_shared<std::thread>(std::bind(&RobotDecisionNode::run, this));
   }
 
@@ -127,7 +142,7 @@ namespace sentry
       local_rate_->sleep();
       if (!this->blackboard.checkAvilable())
         continue;
-      if (this->blackboard.getStage() != 4)
+      if (this->blackboard.getStage() != GAME_STAGE_START)
       {
         RCLCPP_WARN_ONCE(this->get_logger(), "NOT RECIVE START SIGINAL");
         continue;
@@ -161,37 +176,43 @@ namespace sentry
         RCLCPP_ERROR(this->get_logger(), "Failed to make Decision! Check your profile");
         continue;
       }
-      if (past_decision != nullptr)
+      if (blackboard.checkMissionsComplete())
       {
-        if (blackboard.checkMissionsComplete())
-          past_decision = currentDecision;
-        else
+        RCLCPP_INFO(this->get_logger(), "No decision executing, excute next!");
+        past_decision = currentDecision;
+        for (auto &it : currentDecision->actions)
         {
-          if (past_decision->weight < currentDecision->weight || blackboard.getMission().status == action_msgs::msg::GoalStatus::STATUS_ABORTED ||
-              blackboard.getMission().status == action_msgs::msg::GoalStatus::STATUS_CANCELED ||
-              blackboard.getMission().status == action_msgs::msg::GoalStatus::STATUS_UNKNOWN)
-          {
-            RCLCPP_INFO(this->get_logger(), "Decision override ,Mission changed!");
-            past_decision = currentDecision;
-          }
-          else if (blackboard.getMission().status == action_msgs::msg::GoalStatus::STATUS_SUCCEEDED)
-          {
-            blackboard.popMission();
-            if (!blackboard.checkMissionsComplete())
-            {
-              Mission current_mission = blackboard.getMission();
-              //TODO:
-            }
-          }
-          //TODO:
+          Mission mission = parseMission(it);
+          blackboard.insertMission(mission);
         }
       }
       else
       {
-        //TODO:
-        past_decision = currentDecision;
+        if (past_decision->weight < currentDecision->weight ||
+            blackboard.getMission().status == action_msgs::msg::GoalStatus::STATUS_ABORTED ||
+            blackboard.getMission().status == action_msgs::msg::GoalStatus::STATUS_CANCELED ||
+            blackboard.getMission().status == action_msgs::msg::GoalStatus::STATUS_UNKNOWN)
+        {
+          RCLCPP_INFO(this->get_logger(), "Decision override ,Mission changed!");
+          past_decision = currentDecision;
+          blackboard.cleanUpMissions();
+        }
+        else if (blackboard.getMission().status == action_msgs::msg::GoalStatus::STATUS_SUCCEEDED && blackboard.checkWaitingComplete())
+        {
+          RCLCPP_INFO(this->get_logger(), "Mission complete, pop!");
+          last_Mission = blackboard.getMission();
+          blackboard.popMission();
+        }
+        if (blackboard.getMission().status != action_msgs::msg::GoalStatus::STATUS_EXECUTING)
+        {
+          if (!blackboard.checkMissionsComplete() && blackboard.checkWaitingComplete())
+          {
+            RCLCPP_INFO(this->get_logger(), "No mission executing, execute next!");
+            Mission &current_mission = blackboard.getMission();
+            executeMission(current_mission);
+          }
+        }
       }
-      //TODO:
     }
   }
 
@@ -238,14 +259,93 @@ namespace sentry
 
   void RobotDecisionNode::nav2GoalStatusCallBack(const action_msgs::msg::GoalStatusArray::SharedPtr msg)
   {
-    if (msg->status_list.back().status != action_msgs::msg::GoalStatus::STATUS_EXECUTING)
-    {
       RCLCPP_INFO(
           this->get_logger(),
           "Nav2StatusCallBack Status: %d",
           msg->status_list.back().status);
       blackboard.setMissionStatus(msg->status_list.back().status);
+  }
+
+  std::shared_ptr<Way_Point> RobotDecisionNode::getWay_PointByID(int id)
+  {
+    for (auto &it : this->waypoints)
+    {
+      if (it->id == id)
+      {
+        return it;
+      }
     }
+    return nullptr;
+  }
+
+  bool RobotDecisionNode::executeMission(Mission &mission)
+  {
+    if (mission.name == MISSION_TYPE_WAIT)
+    {
+      blackboard.setWaitTime(mission.time_stay);
+    }
+    auto send_goal_options =
+        rclcpp_action::Client<nav2_msgs::action::NavigateToPose>::SendGoalOptions();
+    if (this->nav_to_poses_action_client_->wait_for_action_server(std::chrono::microseconds(100)))
+    {
+      auto pose = geometry_msgs::msg::PoseStamped();
+      pose.header.stamp = this->get_clock()->now();
+      pose.header.frame_id = "map";
+      pose.pose.position.x = mission.move_taget.x;
+      pose.pose.position.y = mission.move_taget.y;
+      pose.pose.position.z = 0.0;
+      pose.pose.orientation = nav2_util::geometry_utils::orientationAroundZAxis(mission.move_taget.w);
+      auto goal = nav2_msgs::action::NavigateToPose::Goal();
+      goal.pose = pose;
+      auto future_goal_handle = nav_to_poses_action_client_->async_send_goal(goal, send_goal_options);
+    }
+    else
+    {
+      RCLCPP_WARN(
+          this->get_logger(),
+          "Action server still not available !");
+      return false;
+    }
+    mission.starting_time = blackboard.getTime();
+    return true;
+  }
+
+  Mission RobotDecisionNode::parseMission(std::string &str)
+  {
+    Mission mission;
+    std::regex reg("_");
+    std::vector<std::string> mission_params(std::sregex_token_iterator(str.begin(), str.end(), reg, -1),
+                                            std::sregex_token_iterator());
+    if (!mission_params.empty())
+    {
+      mission.name = mission_params[0];
+      if (mission.name == MISSION_TYPE_MOVE)
+      {
+        mission.move_taget = *getWay_PointByID(std::stoi(mission_params[1]));
+      }
+      else if (mission.name == MISSION_TYPE_WAIT)
+      {
+        if (last_Mission.move_taget.name.empty())
+        {
+          Way_Point temp_waypoint;
+          temp_waypoint.id = -1;
+          temp_waypoint.name = "origin";
+          double w;
+          Eigen::Vector2d pos;
+          blackboard.getPose(pos, w);
+          temp_waypoint.x = pos[0];
+          temp_waypoint.y = pos[1];
+          temp_waypoint.w = w;
+          mission.move_taget = temp_waypoint;
+        }
+        else
+        {
+          mission.move_taget = last_Mission.move_taget;
+        }
+        mission.time_stay = std::stod(mission_params[1]);
+      }
+    }
+    return mission;
   }
 } // namespace sentry
 
