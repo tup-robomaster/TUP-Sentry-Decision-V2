@@ -62,7 +62,7 @@ namespace sentry
     RCLCPP_INFO(
         this->get_logger(),
         "Starting action_client");
-    this->nav_to_poses_action_client_ = rclcpp_action::create_client<nav2_msgs::action::NavigateToPose>(this, "navigate_through_poses");
+    this->nav_to_poses_action_client_ = rclcpp_action::create_client<nav2_msgs::action::NavigateToPose>(this, "navigate_to_pose");
     if (!this->nav_to_poses_action_client_->wait_for_action_server(std::chrono::seconds(5)))
     {
       RCLCPP_ERROR(
