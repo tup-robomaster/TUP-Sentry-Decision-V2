@@ -1,0 +1,6 @@
+map_builder_node:
+  ros__parameters:
+    use_sim_time: False
+    local_rate: 20.0
+    waypoints_file: "default_waypoints.json"
+    decisions_file: "default_decisions.json"

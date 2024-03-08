@@ -63,7 +63,7 @@ install(TARGETS decision_node
   DESTINATION lib/${PROJECT_NAME})
 
 install(
-  DIRECTORY launch JsonFiles
+  DIRECTORY launch JsonFiles config
   DESTINATION share/${PROJECT_NAME}
 )
 

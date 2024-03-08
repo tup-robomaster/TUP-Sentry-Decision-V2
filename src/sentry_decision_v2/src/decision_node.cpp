@@ -12,7 +12,11 @@ namespace sentry
     initParam();
     initSubscribers();
     initPublishers();
-    readJsonFile();
+    if (!readJsonFile())
+    {
+      RCLCPP_ERROR(this->get_logger(), "Failed to read JsonFile, please check and relaunch the node.");
+      return;
+    }
     init();
   }
 
@@ -63,7 +67,6 @@ namespace sentry
       RCLCPP_ERROR(
           this->get_logger(),
           "Action server not available after waiting");
-      return;
     }
     else
     {
@@ -82,7 +85,7 @@ namespace sentry
     std::string package_share_directory = ament_index_cpp::get_package_share_directory("sentry_decision_v2");
     Json::Reader jsonReader;
     Json::Value jsonValue;
-    std::ifstream jsonFile_waypoints(package_share_directory + "/JsonFile/" + waypoints_file);
+    std::ifstream jsonFile_waypoints(package_share_directory + "/JsonFiles/" + waypoints_file);
     if (!jsonReader.parse(jsonFile_waypoints, jsonValue, true))
     {
       RCLCPP_ERROR(this->get_logger(), "JSON FILE I/O ERR !");
@@ -103,7 +106,7 @@ namespace sentry
     arrayValue.clear();
     jsonValue.clear();
     jsonFile_waypoints.close();
-    std::ifstream jsonFile_decisions(package_share_directory + "/JsonFile/" + decisions_file);
+    std::ifstream jsonFile_decisions(package_share_directory + "/JsonFiles/" + decisions_file);
     if (!jsonReader.parse(jsonFile_decisions, jsonValue, true))
     {
       RCLCPP_ERROR(this->get_logger(), "JSON FILE I/O ERR !");
@@ -141,7 +144,10 @@ namespace sentry
     {
       local_rate_->sleep();
       if (!this->blackboard.checkAvilable())
+      {
+        RCLCPP_WARN_ONCE(this->get_logger(), "UartMsg Not Avilable Now!");
         continue;
+      }
       if (this->blackboard.getStage() != GAME_STAGE_START)
       {
         RCLCPP_WARN_ONCE(this->get_logger(), "NOT RECIVE START SIGINAL");
@@ -259,11 +265,11 @@ namespace sentry
 
   void RobotDecisionNode::nav2GoalStatusCallBack(const action_msgs::msg::GoalStatusArray::SharedPtr msg)
   {
-      RCLCPP_INFO(
-          this->get_logger(),
-          "Nav2StatusCallBack Status: %d",
-          msg->status_list.back().status);
-      blackboard.setMissionStatus(msg->status_list.back().status);
+    RCLCPP_INFO(
+        this->get_logger(),
+        "Nav2StatusCallBack Status: %d",
+        msg->status_list.back().status);
+    blackboard.setMissionStatus(msg->status_list.back().status);
   }
 
   std::shared_ptr<Way_Point> RobotDecisionNode::getWay_PointByID(int id)
@@ -357,3 +363,6 @@ int main(int argc, char **argv)
   rclcpp::shutdown();
   return 0;
 }
+
+#include "rclcpp_components/register_node_macro.hpp"
+RCLCPP_COMPONENTS_REGISTER_NODE(sentry::RobotDecisionNode)
