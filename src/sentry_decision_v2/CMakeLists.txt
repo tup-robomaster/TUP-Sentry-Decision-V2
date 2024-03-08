@@ -15,7 +15,6 @@ find_package(nav_msgs REQUIRED)
 find_package(rclcpp_components REQUIRED)
 find_package(geometry_msgs REQUIRED)
 find_package(rclcpp_lifecycle REQUIRED)
-find_package(message_filters REQUIRED)
 find_package(std_msgs REQUIRED)
 find_package(robot_state_publisher REQUIRED)
 find_package(rosidl_default_generators REQUIRED)
@@ -35,8 +34,7 @@ set(dependencies
   nav_msgs
   std_msgs
   geometry_msgs
-  rclcpp_lifecycle 
-  message_filters 
+  rclcpp_lifecycle  
   robot_state_publisher 
   nav2_behavior_tree
   rosidl_default_generators

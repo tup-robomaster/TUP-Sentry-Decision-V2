@@ -9,6 +9,21 @@
 
   <buildtool_depend>ament_cmake</buildtool_depend>
   <buildtool_depend>auto_aim_interfaces</buildtool_depend>
+  <buildtool_depend>nav2_util</buildtool_depend>
+  <buildtool_depend>nav2_lifecycle_manager</buildtool_depend>
+  <buildtool_depend>nav2_msgs</buildtool_depend>
+  <buildtool_depend>nav2_behavior_tree</buildtool_depend>
+  <buildtool_depend>nav_msgs</buildtool_depend>
+  <buildtool_depend>rclcpp_components</buildtool_depend>
+  <buildtool_depend>geometry_msgs</buildtool_depend>
+  <buildtool_depend>rclcpp_lifecycle</buildtool_depend>
+  <buildtool_depend>std_msgs</buildtool_depend>
+  <buildtool_depend>robot_state_publisher</buildtool_depend>
+  <buildtool_depend>rosidl_default_generators</buildtool_depend>
+  <buildtool_depend>tf2</buildtool_depend>
+  <buildtool_depend>tf2_ros</buildtool_depend>
+  <buildtool_depend>tf2_geometry_msgs</buildtool_depend>
+  <buildtool_depend>visualization_msgs</buildtool_depend>
 
   <test_depend>ament_lint_auto</test_depend>
   <test_depend>ament_lint_common</test_depend>
