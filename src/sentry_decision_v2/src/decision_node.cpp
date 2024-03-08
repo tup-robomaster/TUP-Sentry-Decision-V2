@@ -22,6 +22,7 @@ namespace sentry
 
   RobotDecisionNode::~RobotDecisionNode()
   {
+    main_thread_->join();
   }
 
   void RobotDecisionNode::initParam()
@@ -42,11 +43,11 @@ namespace sentry
     tf_ = std::make_shared<tf2_ros::TransformListener>(*tf_buffer_);
     uart_sub_ = this->create_subscription<auto_aim_interfaces::msg::Uart>("/uart", rclcpp::QoS(10).best_effort().keep_last(1), std::bind(&RobotDecisionNode::uartSubCallback, this, std::placeholders::_1));
     this->nav_to_pose_feedback_sub_ = this->create_subscription<nav2_msgs::action::NavigateToPose::Impl::FeedbackMessage>(
-        "navigate_through_poses/_action/feedback",
+        "navigate_to_pose/_action/feedback",
         rclcpp::QoS(10).best_effort().keep_last(1),
         std::bind(&RobotDecisionNode::nav2FeedBackCallBack, this, std::placeholders::_1));
     this->nav_to_pose_goal_status_sub_ = this->create_subscription<action_msgs::msg::GoalStatusArray>(
-        "navigate_through_poses/_action/status",
+        "navigate_to_pose/_action/status",
         rclcpp::QoS(10).best_effort().keep_last(1),
         std::bind(&RobotDecisionNode::nav2GoalStatusCallBack, this, std::placeholders::_1));
   }
@@ -138,54 +139,70 @@ namespace sentry
     return true;
   }
 
+  // 决策循环方法，负责周期性地进行决策
   void RobotDecisionNode::run()
   {
+    // 主循环，只要ROS节点处于运行状态就一直执行
     while (rclcpp::ok())
     {
+      // 休眠，控制决策循环的频率
       local_rate_->sleep();
+      // 检查UART消息是否可用，若不可用则记录警告
       if (!this->blackboard.checkAvilable())
       {
         RCLCPP_WARN_ONCE(this->get_logger(), "UartMsg Not Avilable Now!");
         continue;
       }
+      // 检查游戏阶段是否为开始状态，若不是则记录警告
       if (this->blackboard.getStage() != GAME_STAGE_START)
       {
         RCLCPP_WARN_ONCE(this->get_logger(), "NOT RECIVE START SIGINAL");
         continue;
       }
+      // 更新黑板中的时间信息
       blackboard.setTime(this->get_clock()->now().nanoseconds() / 1e9);
       geometry_msgs::msg::TransformStamped::SharedPtr transformStamped = nullptr;
+      // 尝试获取base_link到map坐标系的变换
       try
       {
         transformStamped = std::make_shared<geometry_msgs::msg::TransformStamped>(this->tf_buffer_->lookupTransform("map", "base_link", tf2::TimePointZero));
       }
       catch (tf2::TransformException &ex)
       {
+        // 记录变换获取失败的错误
         RCLCPP_ERROR(
             this->get_logger(),
             "Cannot get transform ! TransformException: %s",
             ex.what());
         continue;
       }
+      // 若变换为空，则记录错误并继续下一次循环
       if (transformStamped == nullptr)
       {
         RCLCPP_ERROR(this->get_logger(), "Failed to get transformStamped");
         continue;
       }
+      // 获取当前机器人的位置
       Eigen::Vector2d now_pose;
       now_pose << transformStamped->transform.translation.x, transformStamped->transform.translation.y;
       blackboard.updatePos(now_pose);
+      // 计算机器人当前所在的路标点
       blackboard.setWayPointID(calcCurrentWayPoint(now_pose));
+      // 制定决策并获取当前最优决策
       std::shared_ptr<Decision_Warp> currentDecision = makeDecision();
+      // 若无法制定决策，则记录错误并继续下一次循环
       if (currentDecision == nullptr)
       {
         RCLCPP_ERROR(this->get_logger(), "Failed to make Decision! Check your profile");
         continue;
       }
+      // 检查任务是否全部完成
       if (blackboard.checkMissionsComplete())
       {
+        // 若无正在执行的决策，则执行下一个决策
         RCLCPP_INFO(this->get_logger(), "No decision executing, excute next!");
         past_decision = currentDecision;
+        // 遍历当前决策的所有动作，将它们添加到任务队列中
         for (auto &it : currentDecision->actions)
         {
           Mission mission = parseMission(it);
@@ -194,6 +211,7 @@ namespace sentry
       }
       else
       {
+        // 若当前决策的权重大于过去决策的权重，或者当前任务执行失败或已取消，则覆盖任务队列
         if (past_decision->weight < currentDecision->weight ||
             blackboard.getMission().status == action_msgs::msg::GoalStatus::STATUS_ABORTED ||
             blackboard.getMission().status == action_msgs::msg::GoalStatus::STATUS_CANCELED ||
@@ -203,14 +221,17 @@ namespace sentry
           past_decision = currentDecision;
           blackboard.cleanUpMissions();
         }
+        // 若当前任务已成功且等待任务完成，则移除队首任务
         else if (blackboard.getMission().status == action_msgs::msg::GoalStatus::STATUS_SUCCEEDED && blackboard.checkWaitingComplete())
         {
           RCLCPP_INFO(this->get_logger(), "Mission complete, pop!");
           last_Mission = blackboard.getMission();
           blackboard.popMission();
         }
+        // 如果当前任务状态不是执行中，则检查任务队列是否有任务待执行
         if (blackboard.getMission().status != action_msgs::msg::GoalStatus::STATUS_EXECUTING)
         {
+          // 如果任务队列不为空且队首任务已经等待完成，则执行下一个任务
           if (!blackboard.checkMissionsComplete() && blackboard.checkWaitingComplete())
           {
             RCLCPP_INFO(this->get_logger(), "No mission executing, execute next!");
