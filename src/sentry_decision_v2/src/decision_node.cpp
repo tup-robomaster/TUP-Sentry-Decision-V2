@@ -313,7 +313,7 @@ namespace sentry
     if (mission.name == MISSION_TYPE_WAIT)
     {
       blackboard.setWaitTime(mission.time_stay);
-      return;
+      return true;
     }
     auto send_goal_options =
         rclcpp_action::Client<nav2_msgs::action::NavigateToPose>::SendGoalOptions();
