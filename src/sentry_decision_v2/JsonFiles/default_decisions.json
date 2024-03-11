@@ -5,15 +5,14 @@
             "group": "ATT",
             "name": "test1",
             "wayPointID": -1,
-            "weight": 500,
+            "weight": 400,
             "start_time": -1,
             "end_time": 420,
             "minHP": -1,
             "maxHP": -1,
             "out_post_HP_min": 0,
             "actions": [
-                "move_0",
-                "wait_1"
+                "move_0"
             ]
         },
         {
@@ -29,7 +28,7 @@
             "out_post_HP_min": 0,
             "actions": [
                 "move_1",
-                "wait_1",
+                "wait_3",
                 "move_0"
             ]
         }

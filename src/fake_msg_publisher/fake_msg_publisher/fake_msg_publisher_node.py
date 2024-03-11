@@ -23,7 +23,7 @@ class Lier(Node):
     def make_fake(self):
         self.uart_msg = UartMsg()
         self.uart_msg.remain_time = 419
-        self.uart_msg.outpost_hp = 300
+        self.uart_msg.outpost_hp = 1000
         self.uart_msg.sentry_hp = 600
         self.uart_msg.game_stage = 4
         self.uart_msg.header.stamp = self.get_clock().now().to_msg()

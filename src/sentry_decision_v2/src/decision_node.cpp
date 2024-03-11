@@ -41,7 +41,7 @@ namespace sentry
   {
     tf_buffer_ = std::make_unique<tf2_ros::Buffer>(this->get_clock());
     tf_ = std::make_shared<tf2_ros::TransformListener>(*tf_buffer_);
-    uart_sub_ = this->create_subscription<auto_aim_interfaces::msg::Uart>("/uart", rclcpp::QoS(10).best_effort().keep_last(1), std::bind(&RobotDecisionNode::uartSubCallback, this, std::placeholders::_1));
+    uart_sub_ = this->create_subscription<auto_aim_interfaces::msg::Uart>("/uart", rclcpp::QoS(10).reliable().keep_last(1), std::bind(&RobotDecisionNode::uartSubCallback, this, std::placeholders::_1));
     this->nav_to_pose_feedback_sub_ = this->create_subscription<nav2_msgs::action::NavigateToPose::Impl::FeedbackMessage>(
         "navigate_to_pose/_action/feedback",
         rclcpp::QoS(10).best_effort().keep_last(1),
@@ -201,6 +201,7 @@ namespace sentry
       {
         // 若无正在执行的决策，则执行下一个决策
         RCLCPP_INFO(this->get_logger(), "No decision executing, excute next!");
+        RCLCPP_INFO(this->get_logger(), "Select Decision: %d", currentDecision->id);
         past_decision = currentDecision;
         // 遍历当前决策的所有动作，将它们添加到任务队列中
         for (auto &it : currentDecision->actions)
@@ -222,7 +223,7 @@ namespace sentry
           blackboard.cleanUpMissions();
         }
         // 若当前任务已成功且等待任务完成，则移除队首任务
-        else if (blackboard.getMission().status == action_msgs::msg::GoalStatus::STATUS_SUCCEEDED && blackboard.checkWaitingComplete())
+        else if (blackboard.checkWaitingComplete() && blackboard.getMission().status == action_msgs::msg::GoalStatus::STATUS_SUCCEEDED)
         {
           RCLCPP_INFO(this->get_logger(), "Mission complete, pop!");
           last_Mission = blackboard.getMission();
@@ -290,7 +291,8 @@ namespace sentry
         this->get_logger(),
         "Nav2StatusCallBack Status: %d",
         msg->status_list.back().status);
-    blackboard.setMissionStatus(msg->status_list.back().status);
+    if (blackboard.getMission().name != MISSION_TYPE_WAIT)
+      blackboard.setMissionStatus(msg->status_list.back().status);
   }
 
   std::shared_ptr<Way_Point> RobotDecisionNode::getWay_PointByID(int id)
@@ -307,9 +309,11 @@ namespace sentry
 
   bool RobotDecisionNode::executeMission(Mission &mission)
   {
+    mission.starting_time = blackboard.getTime();
     if (mission.name == MISSION_TYPE_WAIT)
     {
       blackboard.setWaitTime(mission.time_stay);
+      return;
     }
     auto send_goal_options =
         rclcpp_action::Client<nav2_msgs::action::NavigateToPose>::SendGoalOptions();
@@ -333,7 +337,6 @@ namespace sentry
           "Action server still not available !");
       return false;
     }
-    mission.starting_time = blackboard.getTime();
     return true;
   }
 

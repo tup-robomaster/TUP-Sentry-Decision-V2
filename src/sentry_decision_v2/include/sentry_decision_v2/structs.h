@@ -6,6 +6,7 @@
 #include <queue>
 #include <mutex>
 #include <map>
+#include <nav2_behavior_tree/plugins/action/navigate_to_pose_action.hpp>
 
 #define MAX_WAYPOINT_DISTANCE double(1.0)
 #define STAGE_FULL_TIME int(420)
@@ -137,7 +138,15 @@ namespace sentry
         bool checkWaitingComplete()
         {
             std::lock_guard<std::mutex> lck(mutex);
-            return wait_timeout_time - current_time < 1e-6;
+            bool check = wait_timeout_time - current_time < 1e-6;
+            if (_missions.front().name == MISSION_TYPE_WAIT)
+            {
+                if (check)
+                    _missions.front().status = action_msgs::msg::GoalStatus::STATUS_SUCCEEDED;
+                else
+                    _missions.front().status = action_msgs::msg::GoalStatus::STATUS_EXECUTING;
+            }
+            return check;
         }
 
         void cleanUpMissions()
