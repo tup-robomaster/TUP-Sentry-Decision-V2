@@ -65,15 +65,20 @@ namespace sentry
         double current_time = -1;
         std::queue<Mission> _missions;
         double wait_timeout_time = 0;
+        int _commd_keyboard = -1;
+        int _x, _y;
 
     public:
-        void update(int hp, int oupost_hp_remaining, int time_remaining, int stage)
+        void update(int hp, int oupost_hp_remaining, int time_remaining, int stage, int commd_keyboard, int x, int y)
         {
             std::lock_guard<std::mutex> lck(mutex);
             _hp = hp;
             _oupost_hp_remaining = oupost_hp_remaining;
             _time_remaining = time_remaining;
             _stage = stage;
+            _commd_keyboard = commd_keyboard;
+            _x = x;
+            _y = y;
         }
 
         bool checkAvilable()

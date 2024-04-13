@@ -41,20 +41,20 @@ namespace sentry
   {
     tf_buffer_ = std::make_unique<tf2_ros::Buffer>(this->get_clock());
     tf_ = std::make_shared<tf2_ros::TransformListener>(*tf_buffer_);
-    uart_sub_ = this->create_subscription<auto_aim_interfaces::msg::Uart>("/uart", rclcpp::QoS(10).reliable().keep_last(1), std::bind(&RobotDecisionNode::uartSubCallback, this, std::placeholders::_1));
+    uart_sub_ = this->create_subscription<auto_aim_interfaces::msg::Uart>("/uart", rclcpp::SensorDataQoS(), std::bind(&RobotDecisionNode::uartSubCallback, this, std::placeholders::_1));
     this->nav_to_pose_feedback_sub_ = this->create_subscription<nav2_msgs::action::NavigateToPose::Impl::FeedbackMessage>(
         "navigate_to_pose/_action/feedback",
-        rclcpp::QoS(10).best_effort().keep_last(1),
+        rclcpp::SensorDataQoS(),
         std::bind(&RobotDecisionNode::nav2FeedBackCallBack, this, std::placeholders::_1));
     this->nav_to_pose_goal_status_sub_ = this->create_subscription<action_msgs::msg::GoalStatusArray>(
         "navigate_to_pose/_action/status",
-        rclcpp::QoS(10).best_effort().keep_last(1),
+        rclcpp::SensorDataQoS(),
         std::bind(&RobotDecisionNode::nav2GoalStatusCallBack, this, std::placeholders::_1));
   }
 
   void RobotDecisionNode::initPublishers()
   {
-    mark_pub_ = this->create_publisher<visualization_msgs::msg::MarkerArray>("decision_mark", rclcpp::QoS(10).transient_local().keep_last(1));
+    mark_pub_ = this->create_publisher<visualization_msgs::msg::MarkerArray>("decision_mark", rclcpp::SensorDataQoS());
   }
 
   void RobotDecisionNode::init()
@@ -78,7 +78,7 @@ namespace sentry
 
   void RobotDecisionNode::uartSubCallback(const auto_aim_interfaces::msg::Uart::SharedPtr msg)
   {
-    blackboard.update(msg->sentry_hp, msg->outpost_hp, msg->remain_time, msg->game_stage);
+    blackboard.update(msg->sentry_hp, msg->outpost_hp, msg->remain_time, msg->game_stage, msg->commd_keyboard, msg->x, msg->y);
   }
 
   bool RobotDecisionNode::readJsonFile()
@@ -94,6 +94,7 @@ namespace sentry
       return false;
     }
     Json::Value arrayValue = jsonValue["data"];
+    waypoints.reserve(arrayValue.size());
     for (int i = 0; i < int(arrayValue.size()); ++i)
     {
       std::shared_ptr<Way_Point> temp(new Way_Point);
@@ -115,6 +116,7 @@ namespace sentry
       return false;
     }
     arrayValue = jsonValue["data"];
+    decisions.reserve(arrayValue.size());
     for (int i = 0; i < int(arrayValue.size()); ++i)
     {
       std::shared_ptr<Decision_Warp> temp(new Decision_Warp);
@@ -270,7 +272,7 @@ namespace sentry
       if (blackboard.compare(*it))
         local_decisions.emplace_back(it);
     }
-    std::sort(local_decisions.begin(), local_decisions.end(), [](std::shared_ptr<sentry::Decision_Warp> A, std::shared_ptr<sentry::Decision_Warp> B)
+    std::sort(local_decisions.begin(), local_decisions.end(), [](const std::shared_ptr<sentry::Decision_Warp> &A, const std::shared_ptr<sentry::Decision_Warp> &B)
               { return A->weight > B->weight; });
     if (local_decisions.empty())
       return nullptr;
