@@ -11,6 +11,7 @@
 #define MAX_WAYPOINT_DISTANCE double(1.0)
 #define STAGE_FULL_TIME int(420)
 #define GAME_STAGE_START int(4)
+#define GAME_STAGE_END int(5)
 
 #define MISSION_TYPE_MOVE std::string("move")
 #define MISSION_TYPE_WAIT std::string("wait")

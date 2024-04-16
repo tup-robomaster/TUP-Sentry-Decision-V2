@@ -74,7 +74,7 @@ namespace sentry
     }
     else
     {
-      this->nav_to_poses_action_client_->async_cancel_all_goals();
+      this->nav_to_poses_action_client_->async_cancel_all_goals(); // 节点初始化时清空Nav2目标
     }
     main_thread_ = std::make_shared<std::thread>(std::bind(&RobotDecisionNode::run, this));
   }
@@ -168,6 +168,12 @@ namespace sentry
       {
         RCLCPP_WARN_ONCE(this->get_logger(), "NOT RECIVE START SIGINAL");
         continue;
+      }
+      // 检查游戏阶段是否为结束状态，清空任务及Nav2目标
+      else if (this->blackboard.getStage() == GAME_STAGE_END)
+      {
+        this->nav_to_poses_action_client_->async_cancel_all_goals();
+        blackboard.cleanUpMissions();
       }
       // 更新黑板中的时间信息
       blackboard.setTime(this->get_clock()->now().nanoseconds() / 1e9);
@@ -387,9 +393,9 @@ namespace sentry
       mission.name = mission_params[0];
       if (mission.name == MISSION_TYPE_MOVE)
       {
-        if(mission_params.size() == 2)
+        if (mission_params.size() == 2)
           mission.move_taget = *getWay_PointByID(std::stoi(mission_params[1]));
-        if(mission_params.size() == 3)
+        if (mission_params.size() == 3)
         {
           sentry::Way_Point temp;
           temp.id = -1;
