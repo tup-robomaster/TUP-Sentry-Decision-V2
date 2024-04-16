@@ -395,8 +395,8 @@ namespace sentry
           temp.id = -1;
           temp.name = "cmd";
           temp.w = 0.0;
-          temp.x = mission_params[1];
-          temp.y = mission_params[2];
+          temp.x = std::stoi(mission_params[1]);
+          temp.y = std::stoi(mission_params[2]);
           mission.move_taget = temp;
         }
       }
