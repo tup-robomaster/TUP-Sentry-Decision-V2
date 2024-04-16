@@ -41,7 +41,10 @@ namespace sentry
   {
     tf_buffer_ = std::make_unique<tf2_ros::Buffer>(this->get_clock());
     tf_ = std::make_shared<tf2_ros::TransformListener>(*tf_buffer_);
-    uart_sub_ = this->create_subscription<auto_aim_interfaces::msg::Uart>("/uart", rclcpp::SensorDataQoS(), std::bind(&RobotDecisionNode::uartSubCallback, this, std::placeholders::_1));
+    this->uart_sub_ = this->create_subscription<auto_aim_interfaces::msg::Uart>(
+        "/uart",
+        rclcpp::SensorDataQoS(),
+        std::bind(&RobotDecisionNode::uartSubCallback, this, std::placeholders::_1));
     this->nav_to_pose_feedback_sub_ = this->create_subscription<nav2_msgs::action::NavigateToPose::Impl::FeedbackMessage>(
         "navigate_to_pose/_action/feedback",
         rclcpp::SensorDataQoS(),
@@ -78,7 +81,12 @@ namespace sentry
 
   void RobotDecisionNode::uartSubCallback(const auto_aim_interfaces::msg::Uart::SharedPtr msg)
   {
-    blackboard.update(msg->sentry_hp, msg->outpost_hp, msg->remain_time, msg->game_stage, msg->commd_keyboard, msg->x, msg->y);
+    blackboard.update(msg->sentry_hp,    // 哨兵血量
+                      msg->outpost_hp,   // 己方前哨站血量
+                      msg->remain_time,  // 比赛剩余时间
+                      msg->game_stage,   // 比赛进行阶段
+                      msg->cmd_keyboard, // 云台手指令
+                      msg->x, msg->y);   // 云台手指令坐标
   }
 
   bool RobotDecisionNode::readJsonFile()
@@ -98,11 +106,11 @@ namespace sentry
     for (int i = 0; i < int(arrayValue.size()); ++i)
     {
       std::shared_ptr<Way_Point> temp(new Way_Point);
-      temp->id = arrayValue[i]["id"].asInt();
-      temp->name = arrayValue[i]["name"].asCString();
-      temp->x = arrayValue[i]["x"].asDouble();
-      temp->y = arrayValue[i]["y"].asDouble();
-      temp->w = arrayValue[i]["w"].asDouble();
+      temp->id = arrayValue[i]["id"].asInt();         // 路径点ID
+      temp->name = arrayValue[i]["name"].asCString(); // 路径点名
+      temp->x = arrayValue[i]["x"].asDouble();        // 路径点坐标X
+      temp->y = arrayValue[i]["y"].asDouble();        // 路径点坐标Y
+      temp->w = arrayValue[i]["w"].asDouble();        // 路径点朝向
       waypoints.emplace_back(temp);
     }
     arrayValue.clear();
@@ -120,16 +128,16 @@ namespace sentry
     for (int i = 0; i < int(arrayValue.size()); ++i)
     {
       std::shared_ptr<Decision_Warp> temp(new Decision_Warp);
-      temp->id = arrayValue[i]["id"].asInt();
-      temp->group = arrayValue[i]["group"].asCString();
-      temp->name = arrayValue[i]["name"].asCString();
-      temp->waypointID = arrayValue[i]["wayPointID"].asInt();
-      temp->weight = arrayValue[i]["weight"].asInt();
-      temp->start_time = arrayValue[i]["start_time"].asInt();
-      temp->end_time = arrayValue[i]["end_time"].asInt();
-      temp->minHP = arrayValue[i]["minHP"].asInt();
-      temp->maxHP = arrayValue[i]["maxHP"].asInt();
-      temp->outpost_minHP = arrayValue[i]["out_post_HP_min"].asInt();
+      temp->id = arrayValue[i]["id"].asInt();                         // 决策ID
+      temp->group = arrayValue[i]["group"].asCString();               // 决策组别
+      temp->name = arrayValue[i]["name"].asCString();                 // 决策名
+      temp->waypointID = arrayValue[i]["wayPointID"].asInt();         // 决策所属路径点ID
+      temp->weight = arrayValue[i]["weight"].asInt();                 // 决策权重
+      temp->start_time = arrayValue[i]["start_time"].asInt();         // 决策作用时间起始点
+      temp->end_time = arrayValue[i]["end_time"].asInt();             // 决策作用时间终止点
+      temp->minHP = arrayValue[i]["minHP"].asInt();                   // 决策作用血量最低点
+      temp->maxHP = arrayValue[i]["maxHP"].asInt();                   // 决策作用血量最高点
+      temp->outpost_minHP = arrayValue[i]["out_post_HP_min"].asInt(); // 决策作用时最小前哨站血量
       Json::Value actions_array = arrayValue[i]["actions"];
       for (int j = 0; j < int(actions_array.size()); ++j)
       {
@@ -191,7 +199,28 @@ namespace sentry
       // 计算机器人当前所在的路标点
       blackboard.setWayPointID(calcCurrentWayPoint(now_pose));
       // 制定决策并获取当前最优决策
-      std::shared_ptr<Decision_Warp> currentDecision = makeDecision();
+      std::shared_ptr<Decision_Warp> currentDecision = nullptr;
+      if (blackboard.checkCmd_keyboard())
+      {
+        Decision_Warp temp;
+        temp.actions.push_back("move_" + blackboard.getCmd_X() + "_" + blackboard.getCmd_Y());
+        temp.end_time = -1;
+        temp.group = "CMD";
+        temp.start_time = -1;
+        temp.end_time = -1;
+        temp.id = -1;
+        temp.maxHP = -1;
+        temp.minHP = -1;
+        temp.outpost_minHP = 300;
+        temp.name = "cmd";
+        temp.waypointID = -1;
+        temp.weight = 1000;
+        currentDecision = std::make_shared<Decision_Warp>(temp);
+      }
+      else
+      {
+        currentDecision = makeDecision();
+      }
       // 若无法制定决策，则记录错误并继续下一次循环
       if (currentDecision == nullptr)
       {
@@ -284,7 +313,12 @@ namespace sentry
     RCLCPP_DEBUG(
         this->get_logger(),
         "Receive Nav2FeedBack: Distance Remainimg: %f Current Pose: x=%lf , y=%lf , z=%lf Time Remaining: %d in frame %s",
-        msg->feedback.distance_remaining, msg->feedback.current_pose.pose.position.x, msg->feedback.current_pose.pose.position.y, msg->feedback.current_pose.pose.position.z, msg->feedback.estimated_time_remaining.sec, msg->feedback.current_pose.header.frame_id.c_str());
+        msg->feedback.distance_remaining,
+        msg->feedback.current_pose.pose.position.x,
+        msg->feedback.current_pose.pose.position.y,
+        msg->feedback.current_pose.pose.position.z,
+        msg->feedback.estimated_time_remaining.sec,
+        msg->feedback.current_pose.header.frame_id.c_str());
   }
 
   void RobotDecisionNode::nav2GoalStatusCallBack(const action_msgs::msg::GoalStatusArray::SharedPtr msg)
@@ -353,7 +387,18 @@ namespace sentry
       mission.name = mission_params[0];
       if (mission.name == MISSION_TYPE_MOVE)
       {
-        mission.move_taget = *getWay_PointByID(std::stoi(mission_params[1]));
+        if(mission_params.size() == 2)
+          mission.move_taget = *getWay_PointByID(std::stoi(mission_params[1]));
+        if(mission_params.size() == 3)
+        {
+          sentry::Way_Point temp;
+          temp.id = -1;
+          temp.name = "cmd";
+          temp.w = 0.0;
+          temp.x = mission_params[1];
+          temp.y = mission_params[2];
+          mission.move_taget = temp;
+        }
       }
       else if (mission.name == MISSION_TYPE_WAIT)
       {

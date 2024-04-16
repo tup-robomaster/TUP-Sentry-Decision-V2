@@ -1,5 +1,6 @@
 {
     "files.associations": {
+        "*.embeddedhtml": "html",
         "core": "cpp",
         "chrono": "cpp",
         "cctype": "cpp",
@@ -70,6 +71,7 @@
         "cinttypes": "cpp",
         "typeindex": "cpp",
         "typeinfo": "cpp",
-        "variant": "cpp"
+        "variant": "cpp",
+        "valarray": "cpp"
     }
 }
