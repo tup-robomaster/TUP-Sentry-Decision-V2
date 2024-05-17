@@ -249,9 +249,9 @@ namespace sentry
       }
       else
       {
+
         // 若当前决策的权重大于过去决策的权重，或者当前任务执行失败或已取消，则覆盖任务队列
         if (past_decision->weight < currentDecision->weight ||
-            blackboard.getMission().status == action_msgs::msg::GoalStatus::STATUS_ABORTED ||
             blackboard.getMission().status == action_msgs::msg::GoalStatus::STATUS_CANCELED ||
             blackboard.getMission().status == action_msgs::msg::GoalStatus::STATUS_UNKNOWN)
         {
@@ -265,6 +265,10 @@ namespace sentry
           RCLCPP_INFO(this->get_logger(), "Mission complete, pop!");
           last_Mission = blackboard.getMission();
           blackboard.popMission();
+        }
+        else if (blackboard.getMission().status == action_msgs::msg::GoalStatus::STATUS_ABORTED)
+        {
+          RCLCPP_WARN(this->get_logger(), "Mission failed, retry!");
         }
         // 如果当前任务状态不是执行中，则检查任务队列是否有任务待执行
         if (blackboard.getMission().status != action_msgs::msg::GoalStatus::STATUS_EXECUTING)
